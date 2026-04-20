@@ -1,0 +1,5 @@
+# Local development secrets. Copy to .dev.vars (gitignored) and fill in.
+ANTHROPIC_API_KEY=sk-ant-...
+# Optional: send traces to Langfuse Cloud (v1.1 observability).
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=

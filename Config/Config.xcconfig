@@ -1,0 +1,12 @@
+// ============================================================
+// Config.xcconfig — base configuration for all build targets
+// ============================================================
+// Optionally includes Secrets.xcconfig (gitignored).
+// If Secrets.xcconfig is absent the URL resolves to empty and
+// the app surfaces a clear "no Worker URL" error in Settings.
+// ============================================================
+
+#include? "Secrets.xcconfig"
+
+// Inject the Worker URL into the generated Info.plist.
+INFOPLIST_KEY_RoadmapWorkerURL = $(ROADMAP_WORKER_URL)

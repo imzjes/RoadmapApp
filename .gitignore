@@ -1,0 +1,30 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcshareddata/swiftpm/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.moved-aside
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Secrets — build config
+Config/Secrets.xcconfig
+
+# Cloudflare Worker
+roadmap-worker/node_modules/
+roadmap-worker/.wrangler/
+roadmap-worker/.dev.vars
+roadmap-worker/dist/
+
+# Claude / AI working artifacts (not grader-facing)
+CLAUDE.md
+HANDOFF.md
+claude-design-prompts.md
+.claude/

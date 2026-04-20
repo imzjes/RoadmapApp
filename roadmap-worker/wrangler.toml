@@ -1,0 +1,28 @@
+name = "roadmap-worker"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Paid plan required — the agent loop runs past the free-tier CPU budget.
+# Long-running synthesis tasks get up to 5 minutes of CPU.
+[limits]
+cpu_ms = 300000
+
+# Tool-result cache: YouTube/search responses keyed by query hash so we only
+# pay for resource lookups once per topic across users.
+[[kv_namespaces]]
+binding = "RESOURCE_CACHE"
+id = "REPLACE_WITH_KV_ID"
+
+# Per-session agent state. v1.1 will move to Neon Postgres behind the same
+# SessionStore interface the Swift client uses.
+[[durable_objects.bindings]]
+name = "SESSION"
+class_name = "SessionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO"]
+
+[observability]
+enabled = true
