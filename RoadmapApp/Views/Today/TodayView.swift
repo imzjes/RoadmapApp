@@ -2,9 +2,17 @@ import SwiftData
 import SwiftUI
 
 struct TodayView: View {
-    @Query(sort: \LearningTask.orderIndex) private var tasks: [LearningTask]
     @Query(sort: \Roadmap.updatedAt, order: .reverse) private var roadmaps: [Roadmap]
     @Environment(\.modelContext) private var context
+
+    /// All tasks belonging to the active roadmap (or the most recent if none
+    /// is active). We compute this from the roadmaps query rather than a
+    /// separate `@Query<LearningTask>` so stale tasks from deleted roadmaps
+    /// can't bleed in.
+    private var tasks: [LearningTask] {
+        guard let roadmap = activeRoadmap else { return [] }
+        return roadmap.orderedPhases.flatMap(\.orderedTasks)
+    }
 
     var body: some View {
         ScrollView {

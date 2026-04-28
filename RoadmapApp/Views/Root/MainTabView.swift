@@ -20,7 +20,7 @@ struct MainTabView: View {
                 .tag(Tab.review)
 
             NavigationStack { SettingsView() }
-                .tabItem { Label("You", systemImage: "person.circle") }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
         .tint(Theme.accent)

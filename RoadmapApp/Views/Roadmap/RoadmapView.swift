@@ -142,7 +142,10 @@ struct PhaseSectionView: View {
             if expanded {
                 Divider().background(Color.white.opacity(0.4))
                 taskList
-                if !hasResources {
+                if hasResources {
+                    Divider().background(Color.white.opacity(0.4))
+                    resourceList
+                } else {
                     enrichButton
                 }
             }
@@ -227,6 +230,19 @@ struct PhaseSectionView: View {
                             .foregroundStyle(task.isCompleted ? Color.secondary : .primary)
                             .strikethrough(task.isCompleted, color: .secondary)
                         Spacer(minLength: 8)
+                        let count = (task.resources ?? []).count
+                        if count > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "books.vertical.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("\(count)")
+                                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                            }
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.accentSoft))
+                        }
                         Text("\(task.durationMinutes)m")
                             .font(.system(size: 12, weight: .medium).monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -241,6 +257,84 @@ struct PhaseSectionView: View {
             }
         }
         .background(Color.white.opacity(0.5))
+    }
+
+    private var resourceList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                SectionEyebrow(text: "RESOURCES", color: Theme.accent)
+                Spacer()
+                Button {
+                    Task { await flow.enrichPhase(phase) }
+                } label: {
+                    Text(flow.isProcessing ? "Searching…" : "Refresh")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(flow.isProcessing)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+
+            VStack(spacing: 8) {
+                ForEach(phase.orderedTasks) { task in
+                    let resources = task.orderedResources
+                    if !resources.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(task.title)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            ForEach(resources) { resource in
+                                if let url = URL(string: resource.urlString) {
+                                    Link(destination: url) {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: resourceSymbol(resource.kind))
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(Theme.accent)
+                                                .frame(width: 18)
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(resource.title)
+                                                    .font(.system(size: 13, weight: .medium))
+                                                    .foregroundStyle(.primary)
+                                                    .lineLimit(2)
+                                                    .multilineTextAlignment(.leading)
+                                                if let author = resource.author, !author.isEmpty {
+                                                    Text(author)
+                                                        .font(.system(size: 11))
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            Spacer(minLength: 0)
+                                            Image(systemName: "arrow.up.right")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                        .padding(10)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .fill(Color.white.opacity(0.7))
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+    }
+
+    private func resourceSymbol(_ kind: ResourceKind) -> String {
+        switch kind {
+        case .youtube, .video: return "play.rectangle.fill"
+        case .article:         return "doc.text"
+        case .doc, .course:    return "book"
+        case .podcast:         return "headphones"
+        }
     }
 
     @ViewBuilder

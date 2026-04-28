@@ -303,9 +303,9 @@ final class FlowModel {
               let parsed = try? JSONDecoder().decode(EnrichmentPayload.self, from: data) else {
             return
         }
-        let tasksByTitle = Dictionary(uniqueKeysWithValues: phase.orderedTasks.map { ($0.title.lowercased(), $0) })
+        let tasks = phase.orderedTasks
         for resource in parsed.resources {
-            guard let task = tasksByTitle[resource.taskTitle.lowercased()] else { continue }
+            guard let task = matchTask(tasks, name: resource.taskTitle) else { continue }
             let kind = ResourceKind(rawValue: resource.kind) ?? .article
             let model = Resource(
                 title: resource.title,
@@ -322,6 +322,20 @@ final class FlowModel {
         try? store.mainContext.save()
     }
 
+    /// Title match for enrichment. Tries exact, then case-insensitive, then
+    /// substring containment in either direction — the model sometimes
+    /// rephrases the task title slightly.
+    private func matchTask(_ tasks: [LearningTask], name: String) -> LearningTask? {
+        let needle = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let exact = tasks.first(where: { $0.title == needle }) { return exact }
+        let lower = needle.lowercased()
+        if let ci = tasks.first(where: { $0.title.lowercased() == lower }) { return ci }
+        if let partial = tasks.first(where: { $0.title.lowercased().contains(lower) || lower.contains($0.title.lowercased()) }) {
+            return partial
+        }
+        return nil
+    }
+
     private func persistTraceImmediately(_ dto: AgentTraceDTO) {
         liveTraces.append(dto)
         guard let activeRoadmapID,
@@ -336,6 +350,11 @@ final class FlowModel {
     func startOver() {
         Task { [sessionID, session] in
             if let sessionID { await session.endSession(sessionID) }
+        }
+        // Wipe persisted roadmaps so the Today / Roadmap screens don't keep
+        // showing stale tasks from previous goals.
+        for roadmap in store.allRoadmaps() {
+            store.delete(roadmap)
         }
         goalDraft = ""
         sessionID = nil
