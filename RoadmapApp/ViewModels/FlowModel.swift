@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 /// Coarse navigation state for first-launch + active use. Each case maps to
@@ -17,22 +18,34 @@ enum OnboardingStep: Equatable {
     case confirm
 }
 
+/// One question/answer pair in the live assessment. The worker feeds the
+/// question + meta; the client fills in `answer` when the user submits.
+struct AssessmentEntry: Identifiable, Sendable {
+    let id = UUID()
+    var question: String
+    var kind: AssistantMeta.Kind
+    var suggestions: [String]
+    var answer: String?
+}
+
 /// App-wide coordinator. Owned by `RoadmapApp` and passed into the view
-/// hierarchy via `@Environment`. Keeps cross-stage state (session ID, draft
-/// roadmap, transient agent transcripts) in one place so individual views
-/// stay focused on their job.
+/// hierarchy via `@Environment`. Owns cross-stage state (session ID, draft
+/// roadmap, transient agent transcripts) so individual views stay focused.
 @Observable
 @MainActor
 final class FlowModel {
     var phase: FlowPhase = .launch
     var goalDraft: String = ""
     var sessionID: String?
-    var assessmentTranscript: [AssessmentTurn] = []
+    var assessment: [AssessmentEntry] = []
     var liveAssistantText: String = ""
+    var generationStream: String = ""
     var errorMessage: String?
+    var isProcessing: Bool = false
 
-    /// Per-stage live trace entries streamed from the Worker. Rendered on
-    /// the AgentTrace screen while generation is in progress.
+    /// Per-stage live trace entries streamed from the Worker. While onboarding
+    /// is in flight the active roadmap doesn't exist yet, so these buffer
+    /// here and get persisted once the new roadmap is created.
     var liveTraces: [AgentTraceDTO] = []
 
     /// Populated when the user finishes onboarding. Once set, the main tab
@@ -55,8 +68,6 @@ final class FlowModel {
 
     // MARK: Launch decision
 
-    /// Called on first appear. Decides whether to jump straight to the main
-    /// app (returning user) or start onboarding.
     func bootstrap() {
         if let active = store.activeRoadmap() {
             activeRoadmapID = active.id
@@ -66,46 +77,304 @@ final class FlowModel {
         }
     }
 
-    // MARK: Onboarding transitions
+    // MARK: Onboarding — Intake
 
     func submitGoal() async {
         guard !goalDraft.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard !isProcessing else { return }
+        isProcessing = true
+        errorMessage = nil
+        defer { isProcessing = false }
+
         do {
             let id = try await session.createSession()
             sessionID = id
-            phase = .onboarding(.assessment)
+
+            let stream = agent.runIntake(IntakeRequest(goal: goalDraft, sessionID: id))
+            // The intake stage emits two assistant_text events: the goal
+            // restatement (informational) and the first assessment question.
+            var firstText: String?
+            for try await event in stream {
+                switch event {
+                case .assistantText(let text, let meta):
+                    if firstText == nil {
+                        firstText = text
+                        liveAssistantText = text
+                    } else {
+                        appendAssistantQuestion(text, meta: meta)
+                    }
+                case .trace(let dto):
+                    liveTraces.append(dto)
+                case .error(let message):
+                    errorMessage = message
+                default:
+                    break
+                }
+            }
+
+            // Advance to assessment as soon as we have at least one question.
+            if !assessment.isEmpty {
+                phase = .onboarding(.assessment)
+            } else if errorMessage == nil {
+                errorMessage = "The agent didn't return a question. Try again."
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = friendlyMessage(error)
         }
     }
 
-    func submitAssessmentAnswer(_ answer: String) {
-        assessmentTranscript.append(AssessmentTurn(question: nil, answer: answer, done: false))
+    // MARK: Onboarding — Assessment
+
+    func submitAssessmentAnswer(_ answer: String) async {
+        guard let sessionID, let activeIndex = assessment.lastIndex(where: { $0.answer == nil }) else { return }
+        guard !isProcessing else { return }
+        isProcessing = true
+        errorMessage = nil
+        defer { isProcessing = false }
+
+        assessment[activeIndex].answer = answer
+
+        do {
+            let stream = agent.continueAssessment(sessionID: sessionID, answer: answer)
+            for try await event in stream {
+                switch event {
+                case .assistantText(let text, let meta):
+                    appendAssistantQuestion(text, meta: meta)
+                case .trace(let dto):
+                    liveTraces.append(dto)
+                case .stageFinished(_, let payload):
+                    if isFinalAssessmentPayload(payload) {
+                        phase = .onboarding(.confirm)
+                    }
+                case .error(let message):
+                    errorMessage = message
+                default:
+                    break
+                }
+            }
+        } catch {
+            errorMessage = friendlyMessage(error)
+        }
     }
 
     func finishAssessment() {
+        // User explicitly hit "Done — build my plan" before the agent finalized.
         phase = .onboarding(.confirm)
     }
 
-    func generate() {
+    // MARK: Generate
+
+    func generate() async {
+        guard let sessionID else {
+            errorMessage = "Session expired. Start over."
+            return
+        }
+        guard !isProcessing else { return }
+        isProcessing = true
+        errorMessage = nil
         phase = .generating
+        generationStream = ""
+        defer { isProcessing = false }
+
+        do {
+            let stream = agent.runGenerate(sessionID: sessionID)
+            var finalPayload: String?
+            for try await event in stream {
+                switch event {
+                case .partialJSON(let chunk):
+                    generationStream += chunk
+                case .stageFinished(.generate, let payload):
+                    finalPayload = payload
+                case .trace(let dto):
+                    liveTraces.append(dto)
+                case .error(let message):
+                    errorMessage = message
+                default:
+                    break
+                }
+            }
+
+            guard let payload = finalPayload, let data = payload.data(using: .utf8) else {
+                errorMessage = "Generation finished but no roadmap was returned."
+                return
+            }
+
+            let dto = try JSONDecoder().decode(GeneratedRoadmapDTO.self, from: data)
+            let roadmap = dto.materialize(goal: goalDraft)
+            store.insertRoadmap(roadmap)
+            store.activate(roadmap)
+            ScheduleEngine(daysPerWeek: 4).assignDates(to: roadmap)
+            try? store.mainContext.save()
+
+            // Flush buffered trace events onto the new roadmap.
+            let logger = TraceLogger(context: store.mainContext)
+            for trace in liveTraces {
+                logger.append(trace, to: roadmap)
+            }
+            liveTraces.removeAll()
+
+            activeRoadmapID = roadmap.id
+            phase = .ready
+        } catch {
+            errorMessage = friendlyMessage(error)
+        }
     }
 
-    func markReady(roadmapID: UUID) {
-        activeRoadmapID = roadmapID
-        phase = .ready
+    // MARK: Revise
+
+    /// Calls `runRevise` on the active session. Persists every trace to the
+    /// active roadmap and returns the classification ("none" / "small" / "deep")
+    /// so the calling view can show a follow-up confirmation.
+    @discardableResult
+    func revise(notes: String) async -> String? {
+        guard let sessionID else {
+            errorMessage = "Session expired. Run a full assessment to enable revisions."
+            return nil
+        }
+        guard !isProcessing else { return nil }
+        isProcessing = true
+        errorMessage = nil
+        defer { isProcessing = false }
+
+        var classification: String?
+        do {
+            let stream = agent.runRevise(sessionID: sessionID, weeklyReviewJSON: notes)
+            for try await event in stream {
+                switch event {
+                case .trace(let dto):
+                    persistTraceImmediately(dto)
+                case .stageFinished(.revise, let payload):
+                    if let data = payload.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        classification = obj["classification"] as? String
+                    }
+                case .error(let message):
+                    errorMessage = message
+                default:
+                    break
+                }
+            }
+        } catch {
+            errorMessage = friendlyMessage(error)
+        }
+        return classification
+    }
+
+    // MARK: Enrich
+
+    /// Calls `runEnrichment` for one phase. Stateless — sends the phase + tasks
+    /// in the request body so it works without an active session. Decoded
+    /// resources get attached to the matching tasks by case-insensitive title.
+    func enrichPhase(_ phase: Phase) async {
+        guard !isProcessing else { return }
+        isProcessing = true
+        errorMessage = nil
+        defer { isProcessing = false }
+
+        let request = EnrichRequest(
+            phaseID: phase.id.uuidString,
+            phaseTitle: phase.title,
+            tasks: phase.orderedTasks.map { task in
+                EnrichRequest.PhaseTask(title: task.title, detail: task.detail)
+            }
+        )
+
+        do {
+            let stream = agent.runEnrichment(request)
+            for try await event in stream {
+                switch event {
+                case .trace(let dto):
+                    persistTraceImmediately(dto)
+                case .stageFinished(_, let payload):
+                    applyEnrichmentPayload(payload, to: phase)
+                case .error(let message):
+                    errorMessage = message
+                default:
+                    break
+                }
+            }
+        } catch {
+            errorMessage = friendlyMessage(error)
+        }
+    }
+
+    private func applyEnrichmentPayload(_ payload: String, to phase: Phase) {
+        guard let data = payload.data(using: .utf8),
+              let parsed = try? JSONDecoder().decode(EnrichmentPayload.self, from: data) else {
+            return
+        }
+        let tasksByTitle = Dictionary(uniqueKeysWithValues: phase.orderedTasks.map { ($0.title.lowercased(), $0) })
+        for resource in parsed.resources {
+            guard let task = tasksByTitle[resource.taskTitle.lowercased()] else { continue }
+            let kind = ResourceKind(rawValue: resource.kind) ?? .article
+            let model = Resource(
+                title: resource.title,
+                urlString: resource.url,
+                kind: kind,
+                author: resource.author,
+                durationMinutes: resource.durationMinutes
+            )
+            model.task = task
+            var current = task.resources ?? []
+            current.append(model)
+            task.resources = current
+        }
+        try? store.mainContext.save()
+    }
+
+    private func persistTraceImmediately(_ dto: AgentTraceDTO) {
+        liveTraces.append(dto)
+        guard let activeRoadmapID,
+              let roadmap = store.allRoadmaps().first(where: { $0.id == activeRoadmapID }) else {
+            return
+        }
+        TraceLogger(context: store.mainContext).append(dto, to: roadmap)
     }
 
     // MARK: Reset
 
     func startOver() {
+        Task { [sessionID, session] in
+            if let sessionID { await session.endSession(sessionID) }
+        }
         goalDraft = ""
         sessionID = nil
-        assessmentTranscript.removeAll()
+        assessment.removeAll()
         liveAssistantText = ""
+        generationStream = ""
         liveTraces.removeAll()
         errorMessage = nil
         activeRoadmapID = nil
+        isProcessing = false
         phase = .onboarding(.goal)
+    }
+
+    // MARK: Internal helpers
+
+    private func appendAssistantQuestion(_ text: String, meta: AssistantMeta?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        assessment.append(
+            AssessmentEntry(
+                question: trimmed,
+                kind: meta?.kind ?? .open,
+                suggestions: meta?.suggestions ?? []
+            )
+        )
+    }
+
+    private func isFinalAssessmentPayload(_ json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return (obj["done"] as? Bool) == true
+    }
+
+    private func friendlyMessage(_ error: Error) -> String {
+        if let agentError = error as? AgentClientError {
+            return agentError.errorDescription ?? "Agent error."
+        }
+        return error.localizedDescription
     }
 }

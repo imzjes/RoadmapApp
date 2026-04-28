@@ -4,15 +4,15 @@ compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # Paid plan required — the agent loop runs past the free-tier CPU budget.
-# Long-running synthesis tasks get up to 5 minutes of CPU.
-[limits]
-cpu_ms = 300000
+# Default 30s CPU on Paid is enough for our stages; override is opt-in.
+# [limits]
+# cpu_ms = 300000
 
 # Tool-result cache: YouTube/search responses keyed by query hash so we only
 # pay for resource lookups once per topic across users.
 [[kv_namespaces]]
 binding = "RESOURCE_CACHE"
-id = "REPLACE_WITH_KV_ID"
+id = "c9a373638bea4c68a0d22ed9328f6e9a"
 
 # Per-session agent state. v1.1 will move to Neon Postgres behind the same
 # SessionStore interface the Swift client uses.

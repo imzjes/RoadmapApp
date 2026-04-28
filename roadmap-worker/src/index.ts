@@ -13,32 +13,55 @@ export interface Env {
   LANGFUSE_SECRET_KEY?: string;
 }
 
+const CORS_HEADERS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+  "access-control-allow-headers": "content-type, accept",
+  "access-control-max-age": "86400",
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
 
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    let response: Response;
     if (request.method === "POST" && pathname === "/v1/session") {
-      return createSession(env);
+      response = await createSession(env);
+    } else {
+      const sessionMatch = pathname.match(/^\/v1\/session\/([^/]+)$/);
+      if (request.method === "DELETE" && sessionMatch) {
+        response = await endSession(env, sessionMatch[1]);
+      } else if (request.method === "GET" && pathname === "/health") {
+        response = Response.json({ ok: true });
+      } else if (request.method !== "POST") {
+        response = new Response("method not allowed", { status: 405 });
+      } else {
+        switch (pathname) {
+          case "/v1/intake": response = await handleIntake(request, env); break;
+          case "/v1/assess": response = await handleAssess(request, env); break;
+          case "/v1/generate": response = await handleGenerate(request, env); break;
+          case "/v1/enrich": response = await handleEnrich(request, env); break;
+          case "/v1/revise": response = await handleRevise(request, env); break;
+          default: response = new Response("not found", { status: 404 });
+        }
+      }
     }
 
-    const sessionMatch = pathname.match(/^\/v1\/session\/([^/]+)$/);
-    if (request.method === "DELETE" && sessionMatch) {
-      return endSession(env, sessionMatch[1]);
+    // Layer CORS onto every response. Streamed bodies (text/event-stream) keep
+    // their original headers; we just add the CORS allow- headers.
+    const merged = new Headers(response.headers);
+    for (const [key, value] of Object.entries(CORS_HEADERS)) {
+      merged.set(key, value);
     }
-
-    if (request.method !== "POST") {
-      return new Response("method not allowed", { status: 405 });
-    }
-
-    switch (pathname) {
-      case "/v1/intake": return handleIntake(request, env);
-      case "/v1/assess": return handleAssess(request, env);
-      case "/v1/generate": return handleGenerate(request, env);
-      case "/v1/enrich": return handleEnrich(request, env);
-      case "/v1/revise": return handleRevise(request, env);
-      default: return new Response("not found", { status: 404 });
-    }
+    return new Response(response.body, {
+      status: response.status,
+      headers: merged,
+    });
   },
 };
 

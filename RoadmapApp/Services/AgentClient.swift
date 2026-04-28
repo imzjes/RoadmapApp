@@ -1,16 +1,27 @@
 import Foundation
 
 /// Event streamed back from the Cloudflare Worker while the agent loop runs.
-/// Mirrors the Worker's SSE payload shape — one case per event type.
+/// Mirrors the Worker's NDJSON payload shape — one case per event type.
 enum AgentEvent: Sendable {
     case stageStarted(AgentStage)
-    case assistantText(String)
+    case assistantText(String, meta: AssistantMeta?)
     case toolUse(name: String, input: [String: String])
     case toolResult(name: String, summary: String)
     case partialJSON(String)
     case trace(AgentTraceDTO)
     case stageFinished(AgentStage, payloadJSON: String)
     case error(String)
+}
+
+/// Hint from the worker about how the client should render the next question.
+struct AssistantMeta: Codable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case closedChips = "closed-chips"
+        case chipsPlusOther = "chips-plus-other"
+        case open
+    }
+    var kind: Kind?
+    var suggestions: [String]?
 }
 
 /// Plain-old payload for an agent step. Decoded from Worker, mapped into the
@@ -37,19 +48,30 @@ struct AssessmentTurn: Codable, Sendable {
     var done: Bool
 }
 
-/// Client-side interface. Implementations stream Worker SSE responses as a
+/// Client-side interface. Implementations stream Worker NDJSON responses as a
 /// typed `AsyncThrowingStream<AgentEvent>`. Swap the implementation for a
 /// fake in unit tests and previews.
 protocol AgentClient: Sendable {
     func runIntake(_ req: IntakeRequest) -> AsyncThrowingStream<AgentEvent, Error>
     func continueAssessment(sessionID: String, answer: String) -> AsyncThrowingStream<AgentEvent, Error>
     func runGenerate(sessionID: String) -> AsyncThrowingStream<AgentEvent, Error>
-    func runEnrichment(sessionID: String, phaseID: UUID) -> AsyncThrowingStream<AgentEvent, Error>
+    func runEnrichment(_ req: EnrichRequest) -> AsyncThrowingStream<AgentEvent, Error>
     func runRevise(sessionID: String, weeklyReviewJSON: String) -> AsyncThrowingStream<AgentEvent, Error>
 }
 
-/// Production `AgentClient`. Uses the Worker URL from xcconfig. SSE parsing
-/// is deliberately minimal — the Worker emits one JSON object per line.
+struct EnrichRequest: Codable, Sendable {
+    var phaseID: String
+    var phaseTitle: String
+    var tasks: [PhaseTask]
+
+    struct PhaseTask: Codable, Sendable {
+        var title: String
+        var detail: String?
+    }
+}
+
+/// Production `AgentClient`. Uses the Worker URL from xcconfig. The Worker
+/// emits one JSON object per line; we read by lines and decode each one.
 struct LiveAgentClient: AgentClient {
     var baseURL: URL?
 
@@ -69,8 +91,8 @@ struct LiveAgentClient: AgentClient {
         stream(path: "/v1/generate", body: ["sessionID": sessionID])
     }
 
-    func runEnrichment(sessionID: String, phaseID: UUID) -> AsyncThrowingStream<AgentEvent, Error> {
-        stream(path: "/v1/enrich", body: ["sessionID": sessionID, "phaseID": phaseID.uuidString])
+    func runEnrichment(_ req: EnrichRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        stream(path: "/v1/enrich", body: req)
     }
 
     func runRevise(sessionID: String, weeklyReviewJSON: String) -> AsyncThrowingStream<AgentEvent, Error> {
@@ -89,6 +111,7 @@ struct LiveAgentClient: AgentClient {
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    request.timeoutInterval = 600
                     request.httpBody = try JSONEncoder().encode(body)
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -124,7 +147,7 @@ enum AgentClientError: LocalizedError {
 }
 
 extension AgentEvent {
-    /// Decodes one line from the SSE stream. The Worker emits newline-delimited
+    /// Decodes one line from the NDJSON stream. The Worker emits newline-delimited
     /// JSON objects of shape `{"type": "...", ...}`.
     static func decode(line: String) -> AgentEvent? {
         guard let data = line.data(using: .utf8),
@@ -138,7 +161,14 @@ extension AgentEvent {
                 return .stageStarted(stage)
             }
         case "assistant_text":
-            if let t = raw["text"] as? String { return .assistantText(t) }
+            if let t = raw["text"] as? String {
+                var meta: AssistantMeta?
+                if let metaDict = raw["meta"] as? [String: Any],
+                   let metaData = try? JSONSerialization.data(withJSONObject: metaDict) {
+                    meta = try? JSONDecoder().decode(AssistantMeta.self, from: metaData)
+                }
+                return .assistantText(t, meta: meta)
+            }
         case "tool_use":
             let name = (raw["name"] as? String) ?? ""
             let input = (raw["input"] as? [String: String]) ?? [:]
