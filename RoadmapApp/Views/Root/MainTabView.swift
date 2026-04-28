@@ -8,7 +8,7 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack { TodayView() }
-                .tabItem { Label("Today", systemImage: "sun.max") }
+                .tabItem { Label("Today", systemImage: "house") }
                 .tag(Tab.today)
 
             NavigationStack { RoadmapView() }
@@ -20,8 +20,9 @@ struct MainTabView: View {
                 .tag(Tab.review)
 
             NavigationStack { SettingsView() }
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tabItem { Label("You", systemImage: "person.circle") }
                 .tag(Tab.settings)
         }
+        .tint(Theme.accent)
     }
 }

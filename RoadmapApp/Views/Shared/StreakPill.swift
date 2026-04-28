@@ -4,13 +4,18 @@ struct StreakPill: View {
     let summary: StreakSummary
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "flame.fill").foregroundStyle(.orange)
-            Text("\(summary.current) d")
-                .font(.subheadline.weight(.semibold))
+        HStack(spacing: 5) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 13, weight: .semibold))
+            Text("\(summary.current)-day streak")
+                .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: .capsule)
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .background(
+            Capsule().fill(Theme.accentSoft)
+        )
     }
 }
