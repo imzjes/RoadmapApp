@@ -9,7 +9,9 @@ Built as a final project for an Agentic AI course.
 
 ## Demo
 
-<video src="https://github.com/imzjes/RoadmapApp/releases/download/demo-v1/TheRoadMap.mp4" controls></video>
+[![App walkthrough — click to play (1m35s)](docs/media/demo-poster.jpg)](https://github.com/imzjes/RoadmapApp/releases/download/demo-v1/TheRoadMap.mp4)
+
+> Click the thumbnail to play the full-resolution recording in your browser. (GitHub strips inline `<video>` tags in READMEs unless the file is uploaded through their issue/PR attachment flow, which rejected this file's size.)
 
 ## How it works
 
