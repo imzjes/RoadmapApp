@@ -5,7 +5,7 @@ calendarable roadmap. The planning pipeline is built as a visible multi-stage
 agent loop — intake → adaptive assessment → generation → lazy enrichment →
 weekly revision — so the user can see the agent's reasoning as it works.
 
-Built as a final project for an Agentic AI course.
+Built as a final project for an Agentic AI class.
 
 ## Demo
 
