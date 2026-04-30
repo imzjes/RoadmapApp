@@ -3,7 +3,6 @@ import { jsonStream } from "./_stream";
 import {
   anthropic,
   cachedSystem,
-  firstTextBlock,
   MODEL_HAIKU,
   traceFromResponse,
 } from "./_anthropic";
@@ -76,19 +75,28 @@ export async function handleEnrich(request: Request, env: Env): Promise<Response
 
     const response = await client.messages.create({
       model: MODEL_HAIKU,
-      max_tokens: 3000,
+      max_tokens: 4000,
       system: cachedSystem(ENRICH_SYSTEM),
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8 } as any],
       messages: [{ role: "user", content: [{ type: "text", text: userTurn }] }],
     });
 
-    const text = firstTextBlock(response.content).trim();
-    const cleaned = stripJsonFence(text);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      parsed = { resources: [] };
+    // Concatenate every text block — the model often emits a preamble
+    // text block before the JSON when web_search is involved.
+    const fullText = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text)
+      .join("\n")
+      .trim();
+
+    let parsed: { resources?: unknown[] } = { resources: [] };
+    const candidate = extractJsonObject(fullText);
+    if (candidate) {
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        // fall through with empty resources
+      }
     }
 
     const payload = JSON.stringify(parsed);
@@ -117,8 +125,13 @@ export async function handleEnrich(request: Request, env: Env): Promise<Response
   });
 }
 
-function stripJsonFence(text: string): string {
+/// Pull the first JSON object out of `text`. Tries fenced ```json first,
+/// then falls back to the substring between the first `{` and the last `}`.
+function extractJsonObject(text: string): string | null {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
-  return text;
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) return text.slice(first, last + 1);
+  return null;
 }

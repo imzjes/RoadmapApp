@@ -299,13 +299,31 @@ final class FlowModel {
     }
 
     private func applyEnrichmentPayload(_ payload: String, to phase: Phase) {
-        guard let data = payload.data(using: .utf8),
-              let parsed = try? JSONDecoder().decode(EnrichmentPayload.self, from: data) else {
+        guard let data = payload.data(using: .utf8) else {
+            errorMessage = "Couldn't decode enrichment payload."
             return
         }
+        let parsed: EnrichmentPayload
+        do {
+            parsed = try JSONDecoder().decode(EnrichmentPayload.self, from: data)
+        } catch {
+            errorMessage = "Enrichment JSON parse failed: \(error.localizedDescription)"
+            return
+        }
+
+        guard !parsed.resources.isEmpty else {
+            errorMessage = "Search returned no resources for this phase."
+            return
+        }
+
         let tasks = phase.orderedTasks
+        var attached = 0
         for resource in parsed.resources {
-            guard let task = matchTask(tasks, name: resource.taskTitle) else { continue }
+            // Match by title with progressive leniency; fall back to the
+            // first task so the user always sees output even if the model
+            // rephrased every title.
+            let task = matchTask(tasks, name: resource.taskTitle) ?? tasks.first
+            guard let task else { continue }
             let kind = ResourceKind(rawValue: resource.kind) ?? .article
             let model = Resource(
                 title: resource.title,
@@ -314,12 +332,25 @@ final class FlowModel {
                 author: resource.author,
                 durationMinutes: resource.durationMinutes
             )
+            // Explicit insert — SwiftData doesn't always cascade through
+            // inverse relationships when the parent already exists.
+            store.mainContext.insert(model)
             model.task = task
             var current = task.resources ?? []
             current.append(model)
             task.resources = current
+            attached += 1
         }
-        try? store.mainContext.save()
+
+        if attached == 0 {
+            errorMessage = "Couldn't attach \(parsed.resources.count) resources — task titles didn't match."
+        }
+
+        do {
+            try store.mainContext.save()
+        } catch {
+            errorMessage = "Save failed: \(error.localizedDescription)"
+        }
     }
 
     /// Title match for enrichment. Tries exact, then case-insensitive, then
