@@ -7,6 +7,10 @@ weekly revision — so the user can see the agent's reasoning as it works.
 
 Built as a final project for an Agentic AI course.
 
+## Demo
+
+> _Replace this line with the demo video: on github.com, open `README.md`, click the pencil to edit, drag `TheRoadMap.mp4` into this paragraph (GitHub inserts an inline player automatically), then commit on the master branch._
+
 ## How it works
 
 1. **Intake.** User enters a goal in natural language ("play fingerstyle
