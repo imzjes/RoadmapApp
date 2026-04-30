@@ -9,7 +9,7 @@ Built as a final project for an Agentic AI course.
 
 ## Demo
 
-> _Replace this line with the demo video: on github.com, open `README.md`, click the pencil to edit, drag `TheRoadMap.mp4` into this paragraph (GitHub inserts an inline player automatically), then commit on the master branch._
+<video src="https://github.com/imzjes/RoadmapApp/releases/download/demo-v1/TheRoadMap.mp4" controls></video>
 
 ## How it works
 
