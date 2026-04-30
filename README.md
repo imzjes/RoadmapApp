@@ -54,19 +54,36 @@ roadmap-worker/        Cloudflare Worker (TypeScript)
 docs/                  Architecture, data model, agent flow, patterns, gotchas
 ```
 
-## Build
+## Prerequisites
 
-Requires Xcode 26+ and the iOS 26 SDK.
+- macOS with **Xcode 26+** and the **iOS 26 SDK**.
+- An iOS 26 simulator (the project is tuned for **iPhone 17 Pro**, but any
+  iOS 26 simulator works). Deployment target is iOS 18+.
+- No third-party Swift packages — clone and build, nothing else to install.
+
+The optional backend section below also requires Node 18+, a Cloudflare
+account, and an Anthropic API key.
+
+## Quick start
+
+The app ships pointed at a deployed Cloudflare Worker
+(`roadmap-worker.imalabekov.workers.dev`), so it is runnable end-to-end
+without any backend setup:
 
 ```sh
+git clone https://github.com/imzjes/RoadmapApp.git
+cd RoadmapApp
 open RoadmapApp.xcodeproj
-# set the RoadmapApp scheme, run on an iPhone 17 Pro simulator
 ```
 
-The app runs with mock data if no worker URL is configured — the seed
-roadmap under `Models/SeedData.swift` fills in during development.
+In Xcode, select the **RoadmapApp** scheme and an iOS 26 simulator, then
+press ⌘R. The onboarding flow (intake → assessment → roadmap generation)
+calls the live worker, so a real Anthropic-generated roadmap appears.
 
-## Backend
+## Run your own backend (optional)
+
+Only needed if you want to host the agent pipeline yourself rather than
+hit the deployed worker.
 
 ```sh
 cd roadmap-worker
@@ -78,7 +95,8 @@ npx wrangler dev                    # local
 npx wrangler deploy                 # ship
 ```
 
-Copy the deployed URL into `Config/Secrets.xcconfig`:
+Copy the deployed URL into a new `Config/Secrets.xcconfig` (gitignored;
+overrides the default):
 
 ```
 SLASH = /
