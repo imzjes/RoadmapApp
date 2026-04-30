@@ -58,7 +58,7 @@ struct GoalEntryView: View {
             .glassCard(padding: 12, emphasized: focused)
             .padding(.bottom, 14)
 
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 ForEach(suggestions, id: \.self) { s in
                     Button {
                         flow.goalDraft = s
@@ -66,6 +66,8 @@ struct GoalEntryView: View {
                         Text(s)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
                             .padding(.horizontal, 12)
                             .frame(height: 30)
                             .background(
