@@ -7,11 +7,17 @@ weekly revision — so the user can see the agent's reasoning as it works.
 
 Built as a final project for an Agentic AI class.
 
-## Demo
+## Demo & Presentation
 
 [![App walkthrough — click to play (1m35s)](docs/media/demo-poster.jpg)](https://cdn.jsdelivr.net/gh/imzjes/RoadmapApp@master/docs/media/demo.mp4)
 
-Click the thumbnail to open the recording in your browser's video player.
+**App walkthrough — 1m35s.** A screen recording of the live app: onboarding, generation, and a populated roadmap.
+
+[![Project presentation — click to play (5m13s)](docs/media/presentation-poster.jpg)](https://cdn.jsdelivr.net/gh/imzjes/RoadmapApp@master/docs/media/presentation.mp4)
+
+**Project presentation — 5m13s.** A walkthrough of the agent pipeline, architectural decisions, and what's behind each stage.
+
+Click either thumbnail to play in your browser.
 
 ## How it works
 
